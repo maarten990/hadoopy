@@ -23,20 +23,20 @@ import os
 
 from hadoop.util.ReflectionUtils import hadoopClassFromName, hadoopClassName
 
-from compress import CodecPool
+from .compress import CodecPool
 
-from WritableUtils import readVInt, writeVInt
-from Writable import Writable
-from OutputStream import FileOutputStream, DataOutputStream, DataOutputBuffer
-from InputStream import FileInputStream, DataInputStream, DataInputBuffer
-from VersionMismatchException import VersionMismatchException, VersionPrefixException
+from .WritableUtils import readVInt, writeVInt
+from .Writable import Writable
+from .OutputStream import FileOutputStream, DataOutputStream, DataOutputBuffer
+from .InputStream import FileInputStream, DataInputStream, DataInputBuffer
+from .VersionMismatchException import VersionMismatchException, VersionPrefixException
 
-from Text import Text
+from .Text import Text
 
-BLOCK_COMPRESS_VERSION  = '\x04'
-CUSTOM_COMPRESS_VERSION = '\x05'
-VERSION_WITH_METADATA   = '\x06'
-VERSION_PREFIX = 'SEQ'
+BLOCK_COMPRESS_VERSION  = b'\x04'
+CUSTOM_COMPRESS_VERSION = b'\x05'
+VERSION_WITH_METADATA   = b'\x06'
+VERSION_PREFIX = b'SEQ'
 VERSION = VERSION_PREFIX + VERSION_WITH_METADATA
 
 SYNC_ESCAPE = -1
@@ -64,26 +64,26 @@ class Metadata(Writable):
         self._meta[name] = value
 
     def keys(self):
-        return self._meta.keys()
+        return list(self._meta.keys())
 
     def iterkeys(self):
-        return self._meta.iterkeys()
+        return iter(self._meta.keys())
 
     def values(self):
-        return self._meta.values()
+        return list(self._meta.values())
 
     def itervalues(self):
-        return self._meta.itervalues()
+        return iter(self._meta.values())
 
     def iteritems(self):
-        return self._meta.iteritems()
+        return iter(self._meta.items())
 
     def __iter__(self):
-        return self._meta.iteritems()
+        return iter(self._meta.items())
 
     def write(self, data_output):
         data_output.writeInt(len(self._meta))
-        for key, value in self._meta.iteritems():
+        for key, value in self._meta.items():
             Text.writeString(data_output, key)
             Text.writeString(data_output, value)
 
@@ -92,7 +92,7 @@ class Metadata(Writable):
         if count < 0:
             raise IOError("Invalid size: %d for file metadata object" % count)
 
-        for i in xrange(count):
+        for i in range(count):
             key = Text.readString(data_input)
             value = Text.readString(data_input)
             self._meta[key] = value
@@ -103,10 +103,10 @@ def createWriter(path, key_class, value_class, metadata=None, compression_type=C
     if compression_type == CompressionType.NONE:
         pass
     elif compression_type == CompressionType.RECORD:
-        kwargs['compress'] = True
+        kwargs[b'compress'] = True
     elif compression_type == CompressionType.BLOCK:
-        kwargs['compress'] = True
-        kwargs['block_compress'] = True
+        kwargs[b'compress'] = True
+        kwargs[b'block_compress'] = True
     else:
         raise NotImplementedError("Compression Type Not Supported")
 
@@ -145,7 +145,7 @@ class Writer(object):
         self._stream = DataOutputStream(FileOutputStream(path))
 
         # sync is 16 random bytes
-        self._sync = md5('%s@%d' % (uuid1().bytes, int(time() * 1000))).digest()
+        self._sync = md5(b'%s@%d' % (uuid1().bytes, int(time() * 1000))).digest()
 
         self._writeFileHeader()
 
@@ -263,7 +263,7 @@ class Writer(object):
         self._stream.writeBoolean(self._block_compress)
 
         if self._codec:
-            Text.writeString(self._stream, 'org.apache.hadoop.io.compress.DefaultCodec')
+            Text.writeString(self._stream, b'org.apache.hadoop.io.compress.DefaultCodec')
 
         self._metadata.write(self._stream)
         self._stream.write(self._sync)
@@ -335,7 +335,7 @@ class Reader(object):
             self._record.reset(self._stream.read(record_length - key_length))
             return key
         else:
-            if hasattr(self, '_block_index') and \
+            if hasattr(self, b'_block_index') and \
                self._block_index < self._record[0]:
                 self._sync_seen = False
                 records, keys_len, keys, values_len, values = self._record
@@ -457,33 +457,33 @@ class Reader(object):
             raise VersionMismatchException(VERSION[len(VERSION_PREFIX)],
                                            self._version)
 
-        if self._version < BLOCK_COMPRESS_VERSION:
+        if self._version < ord(BLOCK_COMPRESS_VERSION):
             # Same as below, but with UTF8 Deprecated Class
             raise NotImplementedError
         else:
             self._key_class_name = Text.readString(self._stream)
             self._value_class_name = Text.readString(self._stream)
 
-        if ord(self._version) > 2:
+        if self._version > 2:
             self._decompress = self._stream.readBoolean()
         else:
             self._decompress = False
 
-        if self._version >= BLOCK_COMPRESS_VERSION:
+        if self._version >= ord(BLOCK_COMPRESS_VERSION):
             self._block_compressed = self._stream.readBoolean()
         else:
             self._block_compressed = False
 
         # setup compression codec
         if self._decompress:
-            if self._version >= CUSTOM_COMPRESS_VERSION:
+            if self._version >= ord(CUSTOM_COMPRESS_VERSION):
                 codec_class = Text.readString(self._stream)
                 self._codec = CodecPool().getDecompressor(codec_class)
             else:
                 self._codec = CodecPool().getDecompressor()
 
         self._metadata = Metadata()
-        if self._version >= VERSION_WITH_METADATA:
+        if self._version >= ord(VERSION_WITH_METADATA):
             self._metadata.readFields(self._stream)
 
         if self._version > 1:
